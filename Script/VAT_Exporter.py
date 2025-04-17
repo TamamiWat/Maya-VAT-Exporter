@@ -6,6 +6,10 @@ import os
 import struct
 import time
 import math
+import numpy as np
+import imageio.v2 as imageio
+import VAT_Exporter_UI as ui
+import maya.cmds as cmds
 
 #----------------------------------------------------------------
 
@@ -13,7 +17,7 @@ import math
 """ Mode Selected Meshes or All Meshes in scene """
 Selected_Meshes = True
 
-""" Global Wars """
+""" Global Vars """
 X = 0
 Y = 1
 Z = 2
@@ -26,29 +30,52 @@ def remap(xMin, xMax, yMin, yMax, t):
 
 """ Selects all the meshes in the scene """    
 def select_all_meshes():
-    mesh_list = pm.ls(type = "mesh")
-    for mesh in mesh_list:
-        mesh.select(add=True, ado=True)    
+    #Gets the shape nodes of all meshes in the scene and makes them selected.  
+    mesh_list = cmds.ls(type='mesh', long=True, noIntermediate=True)
+    
+    mesh_transforms=[]
+    for shape in mesh_list:
+        parents = cmds.listRelatives(shape, parent=True, fullPath=True)
+        if parents:
+            mesh_transforms.append(parents[0])
 
+        if mesh_transforms:
+            cmds.select(mesh_transforms, replace=True)
 
 """ Returns a list of all meshes in the scene """    
 def get_list_of_all_meshes():
-    mesh_list = pm.ls(type = "mesh", references=False)
-    mesh_no_ref_list = [mesh for mesh in mesh_list if mesh.find('Orig') < 1]
-    return mesh_no_ref_list  
+    #Get all non-referenced meshes in the scene.  
+    mesh_list = cmds.ls(type="mesh", long=True)
+
+    mesh_no_ref_list = []
+    for mesh in mesh_list:
+        if cmds.referenceQuery(mesh, isNodeReferenced=True):
+            continue
+    
+    if "Orig" not in mesh:
+        mesh_no_ref_list.append(mesh)
+
+    return mesh_no_ref_list
 
 """ Returns a list of all selected meshes in the scene """   
 def get_list_of_selected_meshes():
-    mesh_list = pm.ls(sl = True)
-    return mesh_list
-
+    #Returns a list of the nodes currently selected by the user.
+    selected_mesh = cmds.ls(selection=True, long=True)
+    return selected_mesh
 
 """ Returns a list of all CTRL nurbs in scene """
 def get_list_of_all_ctrl_nurbs():
-    nurbs_shape_list = pm.ls(type = "nurbsCurve")
-    ctrl_list = [nurbs.getParent() for nurbs in nurbs_shape_list if nurbs.find('_CTRL') > 0]
-    return ctrl_list
+    #Get all the shape nodes of a NURBS curve and extract only those that have CTRL in their name.
+    nurbs_shape_list = cmds.ls(type = "nurbsCurve", long=True)
+    ctrl_list = []
 
+    for ctrl in nurbs_shape_list:
+        if 'CTRL' in ctrl:
+            parent = cmds.listRelatives(ctrl, parent=True, fullPath=True)
+            if parent:
+                ctrl_list.append(parent[0])
+
+    return ctrl_list
 
 """ Returns a list of keyframes from objects in list """
 def get_list_of_keyframes(object_list):
@@ -61,21 +88,22 @@ def get_list_of_keyframes(object_list):
     pm.select(clear = True)
     return list_of_keyframes
 
-
 """ Make sense of the currentUnit query command """
 def demystify(fpsQuery):
-    daFPS = 0
-    if fpsQuery == "game": daFPS = 15
-    elif fpsQuery == "film": daFPS = 24    
-    elif fpsQuery == "pal": daFPS = 25
-    elif fpsQuery == "ntsc": daFPS = 30
-    elif fpsQuery == "show": daFPS = 48
-    elif fpsQuery == "palf": daFPS = 50
-    elif fpsQuery == "ntscf": daFPS = 60
-    else: daFPS = int(round(float(fpsQuery[:len(fpsQuery)-3])))
-    return daFPS
+    lookup = {
+        "game": 15,
+        "film": 24,
+        "pal": 25,
+        "ntsc": 30,
+        "show": 48,
+        "palf": 50,
+        "ntscf": 60
+    }
+    if fpsQuery in lookup:
+        return lookup[fpsQuery]
+    else:
+        return float(fpsQuery.replace("fps", ""))
     
-
 """ Returns a list of all the vertecies positions from a list of meshes """
 def get_list_of_vertex_positions(mesh_list):
     vtx_pos = []
@@ -399,7 +427,12 @@ def add_padding_to_eol(buffer_list, buffer_width, buffer_height):
             output_list.append(0)     
         
     return buffer_list + output_list
-    
+
+def save_float32_exr(buffer_list, width, height, save_path):
+    # buffer_list : flat float values' list [R, G, B, A, R, G, B, A, ...]
+    array = np.array(buffer_list, dtype=np.float32).reshape((height, width, 4))
+    imageio.imwrite(save_path, array, format='EXR')
+
 #----------------------------------------------------------------
 #----------------------------------------------------------------
 """ Main program """
@@ -525,6 +558,8 @@ def make_dat_texture():
         else:
             print("dir fault")
     #-----------------------------------------------
+    
+
     
     elapsedTime = time.time() - start_time
     if (elapsedTime < 1) : sec = "of a second!!"
