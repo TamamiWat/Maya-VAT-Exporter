@@ -1,7 +1,7 @@
-import pymel.core as pm
-from PIL import Image
-from PIL import ImagePalette
-from PIL import ImageShow
+# import pymel.core as pm
+# from PIL import Image
+# from PIL import ImagePalette
+# from PIL import ImageShow
 import os
 import struct
 import time
@@ -26,7 +26,6 @@ Z = 2
 
 def remap(xMin, xMax, yMin, yMax, t):
     return yMin + (yMax - yMin) * ((t - xMin) / (xMax - xMin))
-
 
 """ Selects all the meshes in the scene """    
 def select_all_meshes():
@@ -79,15 +78,18 @@ def get_list_of_all_ctrl_nurbs():
 
 """ Returns a list of keyframes from objects in list """
 def get_list_of_keyframes(object_list):
-    pm.select(clear = True)
-    for object in object_list:
-        object.select(add=True)
-    time_min = pm.playbackOptions(q=True, min=True)
-    time_max = pm.playbackOptions(q=True, max=True)
-    list_of_keyframes = sorted(list(dict.fromkeys(pm.keyframe(q=True, time=(time_min, time_max)))))  
-    pm.select(clear = True)
-    return list_of_keyframes
+    #get range of time slider
+    time_min = cmds.playbackOptions(q=True, min=True)
+    time_max = cmds.playbackOptions(q=True, max=True)
 
+    #get keyframes
+    keyframes=cmds.keyframe(object_list, time=(time_min, time_max), query=True)
+    if not keyframes:
+        return []
+    
+    unique_keys = sorted(set(keyframes))
+    return unique_keys
+    
 """ Make sense of the currentUnit query command """
 def demystify(fpsQuery):
     lookup = {
@@ -126,19 +128,65 @@ def get_next_power_of_2(n):
 
     
 """ Write "global" vertex index in all meshes vertecies in mesh_list to the red and green vertex color channels """    
+#use 32bit
 def write_vertex_index_to_vertex_color(mesh_list):
     global_vtx_index = 0
-    pm.currentTime(0)
-    for mesh_index, mesh in enumerate(mesh_list): 
-      
-        for vtx_index, vtx in enumerate(mesh.vtx):           
-            y1, y2, y3, y4 = (global_vtx_index & 0xFFFFFFFF).to_bytes(4, 'big')
-            vtx.select()
-            y3 = remap(0, 255, 0, 1, y3)
-            y4 = remap(0, 255, 0, 1, y4)
-            pm.polyColorPerVertex(r=(y3), g=(y4), cdo=True)
-            global_vtx_index += 1
+    cmds.currentTime(0)
 
+    for mesh in mesh_list:
+        vertex_count = cmds.polyEvaluate(mesh, vertex=True)
+
+        for i in range(vertex_count):
+            r_byte, g_byte, b_byte, a_byte = (global_vtx_index & 0xFFFFFFFF).to_bytes(4, 'big')
+
+            r = remap(0, 255, 0, 1, r_byte)
+            g = remap(0, 255, 0, 1, g_byte)
+            b = remap(0, 255, 0, 1, b_byte)
+            a = remap(0, 255, 0, 1, a_byte)
+
+            vtx_name = f"{mesh}.vtx[{i}]"
+
+            cmds.polyColorPerVertex(vtx_name, rgb=(r, g, b), a=a, cdo=True)
+
+            global_vtx_index += 1          
+
+"""" Returns vertex positions of intermediate object """
+def get_unanimated_vertex_positions(mesh):
+    shapes = cmds.listRelatives(mesh, shapes=True, fullPath=True) or []
+    for shape in shapes:
+        if cmds.getAttr(shape + ".intermediateObject"):
+            intermediate_shape = shape
+            break
+    else:
+        print(f"[Warning] No intermediate shape found for {mesh}")
+        return []
+
+    count = cmds.polyEvaluate(intermediate_shape, vertex=True)
+    positions = []
+    for i in range(count):
+        vtx = f"{intermediate_shape}.vtx[{i}]"
+        pos = cmds.pointPosition(vtx, world=True)
+        positions.append(pos)
+    return positions
+
+"""" Returns vertex normals of intermediate object """
+def get_ununimated_vertex_normals(mesh):
+    shapes = cmds.listRelatives(mesh, shapes=True, fullPath=True) or []
+    for shape in shapes:
+        if cmds.getAttr(shape + ".intermediateObject"):
+            intermediate_shape = shape
+            break
+    else:
+        print(f"[Warning] No intermediate shape found for {mesh}")
+        return []
+
+    count = cmds.polyEvaluate(intermediate_shape, vertex=True)
+    normals = []
+    for i in range(count):
+        vtx = f"{intermediate_shape}.vtx[{i}]"
+        n = cmds.polyNormalPerVertex(vtx, query=True, xyz=True)
+        normals.append(n[:3])  # First one normal vector
+    return normals
 
 """ Returns min and max of relative positions """
 def get_min_max_of_relative_positions(mesh_list, time_stamps, margin):
@@ -146,174 +194,179 @@ def get_min_max_of_relative_positions(mesh_list, time_stamps, margin):
 
     pos_max = 0
     pos_min = 0    
-    pm.currentTime(time_stamps[0])
     
-    """ Original vtx positions """
-    for mesh_index, mesh in enumerate(mesh_list):   
-        for vtx_index, vtx in enumerate(mesh.vtx):
-            pos = vtx.getPosition(space="world")
-            vtx_orig_pos.append(pos)        
+    # Get original vtx positions from intermediate object
+    for mesh in mesh_list:
+        static_positions = get_unanimated_vertex_positions(mesh)
+        vtx_orig_pos.extend(static_positions)
 
-    for key_frame in range(0,len(time_stamps)):
-        pm.currentTime(time_stamps[key_frame])
+    #Compare the difference with the vertex positions during the animation of each frame.
+    for frame in range(0,len(time_stamps)):
+        cmds.currentTime(frame)
         global_vtx_index = 0
-        for mesh_index, mesh in enumerate(mesh_list):   
-            for vtx_index, vtx in enumerate(mesh.vtx):
-                pos = vtx.getPosition(space="world")
-                pos_x, pos_y, pos_z = (pos-vtx_orig_pos[global_vtx_index])
-                
-                pos_max = max(pos_x, pos_y, pos_z, pos_max)
-                pos_min = min(pos_x, pos_y, pos_z, pos_min)
+
+        for mesh in mesh_list:
+            vtx_count = cmds.polyEvaluate(mesh, vertex=True)
+            for i in range(vtx_count):
+                vtx = f"{mesh}.vtx[{i}]"
+                pos = cmds.pointPosition(vtx, world=True)
+                base = vtx_orig_pos[global_vtx_index]
+
+                offset_x = pos[0] - base[0]
+                offset_y = pos[1] - base[1]
+                offset_z = pos[2] - base[2]
+
+                pos_max = max(pos_max, offset_x, offset_y, offset_z)
+                pos_min = min(pos_min, offset_x, offset_y, offset_z)
 
                 global_vtx_index += 1    
     
-
-    pos_max = pos_max + margin
-    pos_min = pos_min - margin        
+    pos_max += margin
+    pos_min -= margin
+     
     return pos_min, pos_max
 
-
 """ Returns a power of 2 header list """
-def create_header_list(number_of_frames, frame_rate, scale_min, scale_max, next_power_of_2):
-    header_list = []
+# def create_header_list(number_of_frames, frame_rate, scale_min, scale_max, next_power_of_2):
+#     header_list = []
     
-    """ Add no of frames to R channel of first pixel """    
-    header_list.append(number_of_frames)
+#     """ Add no of frames to R channel of first pixel """    
+#     header_list.append(number_of_frames)
     
-    """ Add Frame Rate to G channel of first pixel """
-    header_list.append(frame_rate)
+#     """ Add Frame Rate to G channel of first pixel """
+#     header_list.append(frame_rate)
        
     
-    """ Padd B & A channels in first pixel """    
-    header_list.append(255)     
-    header_list.append(255)
+#     """ Padd B & A channels in first pixel """    
+#     header_list.append(255)     
+#     header_list.append(255)
     
-    """ Add scale_min and scale_max to second and third pixel """ 
-    minBytes = bytearray(struct.pack("f", scale_min))
-    maxBytes = bytearray(struct.pack("f", scale_max))  
+#     """ Add scale_min and scale_max to second and third pixel """ 
+#     minBytes = bytearray(struct.pack("f", scale_min))
+#     maxBytes = bytearray(struct.pack("f", scale_max))  
     
-    header_list.append(minBytes[0])
-    header_list.append(minBytes[1])
-    header_list.append(minBytes[2])            
-    header_list.append(minBytes[3])
+#     header_list.append(minBytes[0])
+#     header_list.append(minBytes[1])
+#     header_list.append(minBytes[2])            
+#     header_list.append(minBytes[3])
     
-    header_list.append(maxBytes[0])
-    header_list.append(maxBytes[1])
-    header_list.append(maxBytes[2])            
-    header_list.append(maxBytes[3])    
+#     header_list.append(maxBytes[0])
+#     header_list.append(maxBytes[1])
+#     header_list.append(maxBytes[2])            
+#     header_list.append(maxBytes[3])    
     
-    """ Padd pixels if needed """
-    padding_range = next_power_of_2 - int(len(header_list)/4)    
-    for i in range(padding_range):
-        header_list.append(0)
-        header_list.append(255)
-        header_list.append(255)
-        header_list.append(0)
+#     """ Padd pixels if needed """
+#     padding_range = next_power_of_2 - int(len(header_list)/4)    
+#     for i in range(padding_range):
+#         header_list.append(0)
+#         header_list.append(255)
+#         header_list.append(255)
+#         header_list.append(0)
     
-    return header_list
+#     return header_list
 
-def make_diff():
-    my_mesh = pm.ls(sl = True)
-    print(my_mesh)
-    diff = 0.007229555950445166
-    pos_orig = []
-    pos_new = [0,0,0]
-    for mesh_index, mesh in enumerate(my_mesh):  
-        print(mesh_index, mesh) 
-        for vtx_index, vtx in enumerate(mesh.vtx):
-            print(vtx_index, vtx)
-            pos = vtx.getPosition(space="world")
+# def make_diff():
+#     my_mesh = pm.ls(sl = True)
+#     print(my_mesh)
+#     diff = 0.007229555950445166
+#     pos_orig = []
+#     pos_new = [0,0,0]
+#     for mesh_index, mesh in enumerate(my_mesh):  
+#         print(mesh_index, mesh) 
+#         for vtx_index, vtx in enumerate(mesh.vtx):
+#             print(vtx_index, vtx)
+#             pos = vtx.getPosition(space="world")
             
-            print(pos)
-            if (vtx_index == 0): 
-                pos_orig = vtx.getPosition(space="world")
-                print("orig :",pos_orig)
-            if (vtx_index == 1):
-                print("Vertex 1")
-                pos_new[X] = pos_orig[X] + diff
-                pos_new[Y] = pos_orig[Y] + diff
-                pos_new[Z] = pos_orig[Z] + diff
-                vtx.setPosition(pos_new, space='world')
+#             print(pos)
+#             if (vtx_index == 0): 
+#                 pos_orig = vtx.getPosition(space="world")
+#                 print("orig :",pos_orig)
+#             if (vtx_index == 1):
+#                 print("Vertex 1")
+#                 pos_new[X] = pos_orig[X] + diff
+#                 pos_new[Y] = pos_orig[Y] + diff
+#                 pos_new[Z] = pos_orig[Z] + diff
+#                 vtx.setPosition(pos_new, space='world')
                 
-            if (vtx_index == 2):
-                print("Vertex 2")
-                pos_new[X] = pos_orig[X] + diff
-                pos_new[Y] = pos_orig[Y] + diff
-                pos_new[Z] = pos_orig[Z] + diff
-                vtx.setPosition(pos_new, space='world')
+#             if (vtx_index == 2):
+#                 print("Vertex 2")
+#                 pos_new[X] = pos_orig[X] + diff
+#                 pos_new[Y] = pos_orig[Y] + diff
+#                 pos_new[Z] = pos_orig[Z] + diff
+#                 vtx.setPosition(pos_new, space='world')
                 
-            if (vtx_index == 3):
-                print("Vertex 3")
-                vtx.setPosition(pos_orig, space='world')
-                
-         
-def append_vertex_positions_and_normals(header_list, mesh_list, time_stamps, scale_min, scale_max):
+#             if (vtx_index == 3):
+#                 print("Vertex 3")
+#                 vtx.setPosition(pos_orig, space='world')
 
-    header_length = int(len(header_list)/4)
-    output_pos_list = []
-    output_normal_list = []
-    original_pos_list = []
+       
+# def append_vertex_positions_and_normals(header_list, mesh_list, time_stamps, scale_min, scale_max):
+
+#     header_length = int(len(header_list)/4)
+#     output_pos_list = []
+#     output_normal_list = []
+#     original_pos_list = []
     
-    pm.currentTime(time_stamps[0])
+#     pm.currentTime(time_stamps[0])
     
-    """ Original vtx positions """
-    for mesh_index, mesh in enumerate(mesh_list):   
-        for vtx_index, vtx in enumerate(mesh.vtx):
-            pos = vtx.getPosition(space="world")
-            original_pos_list.append(pos)  
+#     """ Original vtx positions """
+#     for mesh_index, mesh in enumerate(mesh_list):   
+#         for vtx_index, vtx in enumerate(mesh.vtx):
+#             pos = vtx.getPosition(space="world")
+#             original_pos_list.append(pos)  
     
-    """ Go through every frame """
-    first_frame = int(time_stamps[0])
-    last_frame = int(time_stamps[-1])+1
-    for frame in range(first_frame ,last_frame):
-        global_vtx_index = 0
-        pm.currentTime(frame)
-        for mesh_index, mesh in enumerate(mesh_list):         
-            for vtx_index, vtx in enumerate(mesh.vtx):  
+#     """ Go through every frame """
+#     first_frame = int(time_stamps[0])
+#     last_frame = int(time_stamps[-1])+1
+#     for frame in range(first_frame ,last_frame):
+#         global_vtx_index = 0
+#         pm.currentTime(frame)
+#         for mesh_index, mesh in enumerate(mesh_list):         
+#             for vtx_index, vtx in enumerate(mesh.vtx):  
             
-                """ Get new position, calculate position difference and append scaled value """  
-                pos = vtx.getPosition(space="world") 
+#                 """ Get new position, calculate position difference and append scaled value """  
+#                 pos = vtx.getPosition(space="world") 
 
-                pos[X] = remap(scale_min, scale_max, 0, 255, pos[X] - original_pos_list[global_vtx_index][X])
-                pos[Y] = remap(scale_min, scale_max, 0, 255, pos[Y] - original_pos_list[global_vtx_index][Y])
-                pos[Z] = remap(scale_min, scale_max, 0, 255, pos[Z] - original_pos_list[global_vtx_index][Z])
+#                 pos[X] = remap(scale_min, scale_max, 0, 255, pos[X] - original_pos_list[global_vtx_index][X])
+#                 pos[Y] = remap(scale_min, scale_max, 0, 255, pos[Y] - original_pos_list[global_vtx_index][Y])
+#                 pos[Z] = remap(scale_min, scale_max, 0, 255, pos[Z] - original_pos_list[global_vtx_index][Z])
                 
-                output_pos_list.append(int(round(pos[X])))
-                output_pos_list.append(int(round(pos[Y])))
-                output_pos_list.append(int(round(pos[Z])))           
-                output_pos_list.append(255)                           
+#                 output_pos_list.append(int(round(pos[X])))
+#                 output_pos_list.append(int(round(pos[Y])))
+#                 output_pos_list.append(int(round(pos[Z])))           
+#                 output_pos_list.append(255)                           
                 
-                """ Get vtx normal and append to next pixel """
-                myNormal = vtx.getNormal('world')
-                normalX = int(remap(-1, 1, 0, 65535, myNormal[X]))
-                normalY = int(remap(-1, 1, 0, 65535, myNormal[Y]))
+#                 """ Get vtx normal and append to next pixel """
+#                 myNormal = vtx.getNormal('world')
+#                 normalX = int(remap(-1, 1, 0, 65535, myNormal[X]))
+#                 normalY = int(remap(-1, 1, 0, 65535, myNormal[Y]))
                                                                           
-                """ X-Component """
-                y1, y2, y3, y4 = (normalX & 0xFFFFFFFF).to_bytes(4, 'big')
-                output_normal_list.append(y3)
-                output_normal_list.append(y4)
+#                 """ X-Component """
+#                 y1, y2, y3, y4 = (normalX & 0xFFFFFFFF).to_bytes(4, 'big')
+#                 output_normal_list.append(y3)
+#                 output_normal_list.append(y4)
                                
-                """ Y-Component """
-                y1, y2, y3, y4 = (normalY & 0xFFFFFFFF).to_bytes(4, 'big')
-                output_normal_list.append(y3)
-                output_normal_list.append(y4)
+#                 """ Y-Component """
+#                 y1, y2, y3, y4 = (normalY & 0xFFFFFFFF).to_bytes(4, 'big')
+#                 output_normal_list.append(y3)
+#                 output_normal_list.append(y4)
 
-                global_vtx_index += 1
+#                 global_vtx_index += 1
         
        
-        padding_range = int(header_length - global_vtx_index)
-        if (header_length > global_vtx_index):
-            for i in range(padding_range):
-                output_pos_list.append(255)
-                output_pos_list.append(255)
-                output_pos_list.append(0)
-                output_pos_list.append(0) 
-                output_normal_list.append(255)
-                output_normal_list.append(255)
-                output_normal_list.append(0)
-                output_normal_list.append(0)
+#         padding_range = int(header_length - global_vtx_index)
+#         if (header_length > global_vtx_index):
+#             for i in range(padding_range):
+#                 output_pos_list.append(255)
+#                 output_pos_list.append(255)
+#                 output_pos_list.append(0)
+#                 output_pos_list.append(0) 
+#                 output_normal_list.append(255)
+#                 output_normal_list.append(255)
+#                 output_normal_list.append(0)
+#                 output_normal_list.append(0)
        
-    return header_list + output_pos_list + output_normal_list               
+#     return header_list + output_pos_list + output_normal_list               
 
 
 """ Returns a list with appended and scaled vertex positions relative to first frame """
@@ -372,8 +425,7 @@ def append_normals(header_list, header_pos_list, mesh_list, time_stamps):
     header_length = int(len(header_list)/4)
     output_list = []
     
-    """ Go through every frame """
-    
+    """ Go through every frame """   
     first_frame = int(time_stamps[0])
     last_frame = int(time_stamps[-1])+1
     for frame in range(first_frame ,last_frame):
@@ -412,21 +464,21 @@ def append_normals(header_list, header_pos_list, mesh_list, time_stamps):
 
 
 """ Adds padding to end of list to get a power of 2 texture """
-def add_padding_to_eol(buffer_list, buffer_width, buffer_height):
-    output_list = []
+# def add_padding_to_eol(buffer_list, buffer_width, buffer_height):
+#     output_list = []
     
-    len_buffer_list = len(buffer_list)/4
-    expected_len_buffer_list = buffer_width * buffer_height
-    missing_buffer_len = int(expected_len_buffer_list - len_buffer_list )
+#     len_buffer_list = len(buffer_list)/4
+#     expected_len_buffer_list = buffer_width * buffer_height
+#     missing_buffer_len = int(expected_len_buffer_list - len_buffer_list )
 
-    if (missing_buffer_len > 0):
-        for i in range(missing_buffer_len):
-            output_list.append(255)
-            output_list.append(0)
-            output_list.append(255)
-            output_list.append(0)     
+#     if (missing_buffer_len > 0):
+#         for i in range(missing_buffer_len):
+#             output_list.append(255)
+#             output_list.append(0)
+#             output_list.append(255)
+#             output_list.append(0)     
         
-    return buffer_list + output_list
+#     return buffer_list + output_list
 
 def save_float32_exr(buffer_list, width, height, save_path):
     # buffer_list : flat float values' list [R, G, B, A, R, G, B, A, ...]
@@ -480,9 +532,9 @@ def make_dat_texture():
     
     
 #-----------------------------------------------------------------------
-    """ Create Header information """
-    print("Creating header...")
-    header_list = create_header_list(nr_of_frames, fps, scale_min, scale_max, buffer_width)
+    # """ Create Header information """
+    # print("Creating header...")
+    # header_list = create_header_list(nr_of_frames, fps, scale_min, scale_max, buffer_width)
 
     
 #-----------------------------------------------------------------------
@@ -500,8 +552,8 @@ def make_dat_texture():
     
 #-----------------------------------------------------------------------
     """ Add padding to end of list """
-    print("Appending padding to end of buffert...")
-    header_vertex_pos_padding_list = add_padding_to_eol(header_vertex_pos_normals_list, buffer_width, buffer_height)
+    # print("Appending padding to end of buffert...")
+    # header_vertex_pos_padding_list = add_padding_to_eol(header_vertex_pos_normals_list, buffer_width, buffer_height)
     
     
 #-----------------------------------------------------------------------
