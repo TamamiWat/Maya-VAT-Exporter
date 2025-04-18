@@ -370,9 +370,8 @@ def get_min_max_of_relative_positions(mesh_list, time_stamps, margin):
 
 
 """ Returns a list with appended and scaled vertex positions relative to first frame """
-def append_vertex_positons(header_list, mesh_list, time_stamps, scale_min, scale_max):
+def append_vertex_positons(mesh_list, time_stamps, scale_min, scale_max):
 
-    header_length = int(len(header_list)/4)
     output_list = []
     original_pos_list = []
     
@@ -407,22 +406,12 @@ def append_vertex_positons(header_list, mesh_list, time_stamps, scale_min, scale
 
 
                 global_vtx_index += 1
-        
-       
-        padding_range = int(header_length - global_vtx_index)
-        if (header_length > global_vtx_index):
-            for i in range(padding_range):
-                output_list.append(255)
-                output_list.append(255)
-                output_list.append(0)
-                output_list.append(0) 
              
-    return header_list + output_list
+    return output_list
 
 
 """ Returns a list with appended and scaled vertex normalz """
-def append_normals(header_list, header_pos_list, mesh_list, time_stamps):
-    header_length = int(len(header_list)/4)
+def append_normals(mesh_list, time_stamps):
     output_list = []
     
     """ Go through every frame """   
@@ -450,17 +439,8 @@ def append_normals(header_list, header_pos_list, mesh_list, time_stamps):
                 output_list.append(y4)
 
                 global_vtx_index += 1
-        
-       
-        padding_range = int(header_length - global_vtx_index)
-        if (header_length > global_vtx_index):
-            for i in range(padding_range):
-                output_list.append(255)
-                output_list.append(255)
-                output_list.append(0)
-                output_list.append(0) 
-             
-    return header_pos_list + output_list
+                    
+    return output_list
 
 
 """ Adds padding to end of list to get a power of 2 texture """
@@ -557,7 +537,13 @@ def make_dat_texture():
     
     
 #-----------------------------------------------------------------------
+    # 頂点位置バッファの取得
+    print("Appending vertex positions...")
+    position_buffer = append_vertex_positons(mesh_list, keyframes, scale_min, scale_max)
 
+    # 法線バッファの取得
+    print("Appending normals...")
+    normal_buffer = append_normals(mesh_list, keyframes)
 
 
 #------------------------------------------

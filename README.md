@@ -1,7 +1,7 @@
 # Maya-VAT-Exporter
 *Exports Vertex Animation Texture from Maya*
 
-Developed for Maya 2023 using PyMEL to interact with Maya, Pillow for writing data to DDS
+Developed for Maya 2026 using Maya.cmds to interact with Maya, Pillow for writing data to EXR
 <br>
 <br>
 Example texture used in game <br>
@@ -62,3 +62,7 @@ FBX and Texture to be found in Example folder to investigate :)
 Example texture used in game <br>
 First row is header <br>
 <img loading="lazy" src="./Example/With explinations.png" alt="image_name png" width=60%/>
+
+## Reference
+Time-TechArt / Maya-VAT-Exporter
+https://github.com/Tim-TechArt/Maya-VAT-Exporter.git
