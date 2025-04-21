@@ -27,7 +27,13 @@ Please learn how to use this script from How-To
 
   See how to find mayapy.exe:<br>
   https://help.autodesk.com/view/MAYAUL/2026/ENU/?guid=GUID-D64ACA64-2566-42B3-BE0F-BCE843A1702F
+
+  ### Import:
   
+  Go to script folder & Enter this command:	
+  
+    import Maya_VAT_Exporter.VAT_Exporter_UI as ui
+    ui.show_ui()
   
 ## How-To
 * Make sure the time slider is within the range of the animation you want to output
