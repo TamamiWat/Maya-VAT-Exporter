@@ -1,9 +1,7 @@
 import os
 import time
-import numpy as np
 import maya.cmds as cmds
-import OpenEXR
-import Imath
+
 #----------------------------------------------------------------
 
 """ Switches """
@@ -334,7 +332,7 @@ def save_float32_exr(buffer_list, width, height, save_path):
 """ Main program """
 #----------------------------------------------------------------
 #----------------------------------------------------------------
-def make_dat_texture(output_dir=None, progress_fn=None):
+def make_dat_texture(output_dir=None, base_filename="output", progress_fn=None):
     if output_dir is None:
         output_dir = "C:/Textures/VAT/"
 
@@ -405,12 +403,12 @@ def make_dat_texture(output_dir=None, progress_fn=None):
     scene_name = cmds.file(q=True, sn=True, shortName=True).split('.')[0]
 
     #save position EXR
-    pos_path = os.path.join(output_dir, scene_name + "_position.exr")
+    pos_path = os.path.join(output_dir, base_filename + "_position.exr")
     save_float32_exr(position_buffer, buffer_width, nr_of_frames, pos_path)
     print("Position texture saved to:", pos_path)
 
     #save normal EXR
-    nor_path = os.path.join(output_dir, scene_name + "_normal.exr")
+    nor_path = os.path.join(output_dir, base_filename + "_normal.exr")
     save_float32_exr(normal_buffer, buffer_width, nr_of_frames, nor_path)
     print("Normal texture saved to:", nor_path)
     
