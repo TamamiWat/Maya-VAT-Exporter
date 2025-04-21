@@ -39,10 +39,10 @@ Please learn how to use this script from How-To
 
 ## Sample image
 * Offset positions<br>
-<img loading="lazy" src="./Example/test_positions.exr" alt="offset exr" width=60%/>
+<img loading="lazy" src="./Example/test_position.exr" alt="offset exr" width=60%/>
 
 * Normals<br>
-<img loading="lazy" src="./Example/test_normals.exr" alt="normal exr" width=60%/>
+<img loading="lazy" src="./Example/test_normal.exr" alt="normal exr" width=60%/>
 
 ## Forked from
 Time-TechArt / Maya-VAT-Exporter
