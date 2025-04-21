@@ -25,7 +25,7 @@ Please learn how to use this script from How-To
   
     mayapy -m pip install opencv-python OpenEXR Imath
 
-  See how to find mayapy.exe:
+  See how to find mayapy.exe:<br>
   https://help.autodesk.com/view/MAYAUL/2026/ENU/?guid=GUID-D64ACA64-2566-42B3-BE0F-BCE843A1702F
   
   
@@ -37,10 +37,12 @@ Please learn how to use this script from How-To
 * Press Export button named [Export VAT]
 * If you want to continue to create other VATs, press  [Reset]
 
-## Technical showcase
-Example texture used in game <br>
-First row is header <br>
-<img loading="lazy" src="./Example/With explinations.png" alt="image_name png" width=60%/>
+## Sample image
+* Offset positions<br>
+<img loading="lazy" src="./Example/test_positions.exr" alt="offset exr" width=60%/>
+
+* Normals<br>
+<img loading="lazy" src="./Example/test_normals.exr" alt="normal exr" width=60%/>
 
 ## Forked from
 Time-TechArt / Maya-VAT-Exporter
