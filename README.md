@@ -38,11 +38,12 @@ Please learn how to use this script from How-To
 * If you want to continue to create other VATs, press  [Reset]
 
 ## Sample image
+Checked in TouchDesigner
 * Offset positions<br>
-<img loading="lazy" src="./Example/test_position.exr" alt="offset exr" width=60%/>
+<img loading="lazy" src="./Example/test_position.png" alt="offset png" width=60%/>
 
 * Normals<br>
-<img loading="lazy" src="./Example/test_normal.exr" alt="normal exr" width=60%/>
+<img loading="lazy" src="./Example/test_normal.png" alt="normal png" width=60%/>
 
 ## Forked from
 Time-TechArt / Maya-VAT-Exporter
