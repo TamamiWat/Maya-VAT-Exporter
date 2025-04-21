@@ -86,16 +86,6 @@ def demystify(fpsQuery):
     else:
         return float(fpsQuery.replace("fps", ""))
 
-""" Returns the next n^2 of n """
-def get_next_power_of_2(n):
-    if n == 0:
-        return 1
-    if n & (n - 1) == 0:
-        return n
-    while n & (n - 1) > 0:
-        n &= (n - 1)
-    return n << 1
-
 def get_intermediate_shape(mesh):
     shapes = cmds.listRelatives(mesh, shapes=True, fullPath=True) or []
     for shape in shapes:
@@ -112,10 +102,12 @@ def get_unanimated_vertex_positions(mesh):
 
     count = cmds.polyEvaluate(intermediate_shape, vertex=True)
     positions = []
-    for i in range(count):
-        vtx = f"{intermediate_shape}.vtx[{i}]"
-        pos = cmds.pointPosition(vtx, world=True)
-        positions.append(pos)
+    # for i in range(count):
+    #     vtx = f"{intermediate_shape}.vtx[{i}]"
+    #     pos = cmds.pointPosition(vtx, world=True)
+    #     positions.append(pos)
+    positions = cmds.xform(f"{intermediate_shape}.vtx[*]", q=True, ws=True, t=True)
+    positions = [positions[i:i+3] for i in range(0, len(positions), 3)]
     return positions
 
 """" Returns vertex normals of intermediate object """
@@ -198,7 +190,7 @@ def get_min_max_of_relative_normals(mesh_list, time_stamps, margin=0.0):
 
 
 """ Returns a list with appended and scaled vertex positions relative to first frame """
-def append_vertex_positions_float32(mesh_list, time_stamps, scale_min, scale_max):
+def append_vertex_positions_float32(mesh_list, time_stamps, scale_min, scale_max, progress_fn=None):
     """
     Returns a list of vertex position offsets (relative to the bind pose),
     scaled between scale_min and scale_max, and stored as flat float32 values.
@@ -211,18 +203,17 @@ def append_vertex_positions_float32(mesh_list, time_stamps, scale_min, scale_max
     for mesh in mesh_list:
         original_pos_list.extend(get_unanimated_vertex_positions(mesh))
     
+    total_frames = len(time_stamps)
+    
     # Loop through each frame
-    first_frame = int(time_stamps[0])
-    last_frame = int(time_stamps[-1]) + 1
-
-    for frame in time_stamps:
+    for i, frame in enumerate(time_stamps):
         cmds.currentTime(frame)
         global_vtx_index = 0
 
         for mesh in mesh_list:
             vtx_count = cmds.polyEvaluate(mesh, vertex=True)
-            for i in range(vtx_count):
-                vtx = f"{mesh}.vtx[{i}]"
+            for j in range(vtx_count):
+                vtx = f"{mesh}.vtx[{j}]"
                 current_pos = cmds.pointPosition(vtx, world=True)
                 base_pos = original_pos_list[global_vtx_index]
 
@@ -231,13 +222,13 @@ def append_vertex_positions_float32(mesh_list, time_stamps, scale_min, scale_max
                 offset_y = current_pos[1] - base_pos[1]
                 offset_z = current_pos[2] - base_pos[2]
 
-                # norm_x = remap(scale_min[0], scale_max[0], 0.0, 1.0, offset_x)
-                # norm_y = remap(scale_min[1], scale_max[1], 0.0, 1.0, offset_y)
-                # norm_z = remap(scale_min[2], scale_max[2], 0.0, 1.0, offset_z)
-                # Store as RGBA (A = 1.0 placeholder)
                 output_list.extend([offset_x, offset_y, offset_z, 1.0])
                 global_vtx_index += 1
              
+        if progress_fn:
+            percent = int((i + 1) / total_frames * 50) 
+            progress_fn(percent)
+    
     return output_list
 
 def get_min_max_of_relative_positions_per_axis(mesh_list, time_stamps, margin=0.0):
@@ -279,18 +270,20 @@ def get_min_max_of_relative_positions_per_axis(mesh_list, time_stamps, margin=0.
 
 
 """ Returns a list with appended and scaled vertex normalz """
-def append_normals_float32(mesh_list, time_stamps, scale_min, scale_max):
+def append_normals_float32(mesh_list, time_stamps, scale_min, scale_max, progress_fn=None):
     output_list = []
+
+    total_frames = len(time_stamps)
     
     """ Go through every frame """   
     first_frame = int(time_stamps[0])
     last_frame = int(time_stamps[-1])+1
-    for frame in time_stamps:
+    for i, frame in enumerate(time_stamps):
         cmds.currentTime(frame)
         for mesh in mesh_list:   
             vtx_count = cmds.polyEvaluate(mesh, vertex=True)
-            for i in range(vtx_count):
-                vtx = f"{mesh}.vtx[{i}]"
+            for j in range(vtx_count):
+                vtx = f"{mesh}.vtx[{j}]"
                 normal = cmds.polyNormalPerVertex(vtx, query=True, xyz=True)
                 if normal:
                     nx, ny, nz = normal[:3]
@@ -303,16 +296,13 @@ def append_normals_float32(mesh_list, time_stamps, scale_min, scale_max):
                 norm_z = remap(scale_min[2], scale_max[2], 0.0, 1.0, nz)
 
                 output_list.extend([norm_x, norm_y, norm_z, 1.0])  
+            
+            if progress_fn:
+                percent = 50 + int((i + 1) / total_frames * 50) 
+                progress_fn(percent)
                         
     return output_list
 
-# def save_float32_exr(buffer_list, width, height, save_path):
-#     # buffer_list : flat float values' list [R, G, B, A, R, G, B, A, ...]
-#     array = np.array(buffer_list, dtype=np.float32).reshape((height, width, 4))
-#     try:
-#         imageio.imwrite(save_path, array, format='EXR')
-#     except Exception as e:
-#         print(f"[Error] Failed to write EXR file: {e}")
 def save_float32_exr(buffer_list, width, height, save_path):
     import OpenEXR
     import Imath
@@ -344,7 +334,12 @@ def save_float32_exr(buffer_list, width, height, save_path):
 """ Main program """
 #----------------------------------------------------------------
 #----------------------------------------------------------------
-def make_dat_texture():
+def make_dat_texture(output_dir=None, progress_fn=None):
+    if output_dir is None:
+        output_dir = "C:/Textures/VAT/"
+
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
     print("Start generating VAT...")
     print()
     start_time = time.time() 
@@ -382,19 +377,17 @@ def make_dat_texture():
 #-----------------------------------------------------------------------
     # 頂点位置バッファの取得
     print("Appending vertex positions...")
-    position_buffer = append_vertex_positions_float32(mesh_list, frame_range, scale_min, scale_max)
+    position_buffer = append_vertex_positions_float32(mesh_list, frame_range, scale_min, scale_max, progress_fn=progress_fn)
 
     # 法線バッファの取得
     print("Appending normals...")
     normal_min, normal_max = get_min_max_of_relative_normals(mesh_list, frame_range, 0.0)
-    normal_buffer = append_normals_float32(mesh_list, frame_range, normal_min, normal_max)
+    normal_buffer = append_normals_float32(mesh_list, frame_range, normal_min, normal_max, progress_fn=progress_fn)
 
 
 #------------------------------------------
-    """ Write data to file in DDS format """
-    
-    
-    
+    """ Write data to file in EXR format """
+
     print("--- Analiiiizing ---")
     print("Buffer width :", buffer_width)
     print("Buffer height:", buffer_height)
@@ -406,7 +399,6 @@ def make_dat_texture():
     print()
     print("--- List lengths ---")
     
-    output_dir = "C:/Textures/VAT/"
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
