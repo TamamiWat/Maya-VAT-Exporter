@@ -83,6 +83,16 @@ def demystify(fpsQuery):
         return lookup[fpsQuery]
     else:
         return float(fpsQuery.replace("fps", ""))
+    
+def get_vertex_positions_at_frame(mesh_list, frame):
+    cmds.currentTime(frame)
+    base_positions = []
+    for mesh in mesh_list:
+        vtx_count = cmds.polyEvaluate(mesh, vertex=True)
+        for i in range(vtx_count):
+            pos = cmds.pointPosition(f"{mesh}.vtx[{i}]", world=True)
+            base_positions.append(pos)
+    return base_positions
 
 def get_intermediate_shape(mesh):
     shapes = cmds.listRelatives(mesh, shapes=True, fullPath=True) or []
@@ -188,49 +198,47 @@ def get_min_max_of_relative_normals(mesh_list, time_stamps, margin=0.0):
 
 
 """ Returns a list with appended and scaled vertex positions relative to first frame """
-def append_vertex_positions_float32(mesh_list, time_stamps, scale_min, scale_max, progress_fn=None):
+def append_vertex_positions_float32(mesh_list, time_stamps, base_position,  scale_min, scale_max, progress_fn=None):
     """
     Returns a list of vertex position offsets (relative to the bind pose),
     scaled between scale_min and scale_max, and stored as flat float32 values.
     Output format: [X, Y, Z, 1.0,  X, Y, Z, 1.0,  ...] (per vertex per frame)
     """
     output_list = []
-    original_pos_list = []
+    # original_pos_list = []
 
-    # Get unanimated positions from intermediate object
-    for mesh in mesh_list:
-        original_pos_list.extend(get_unanimated_vertex_positions(mesh))
+    # # Get unanimated positions from intermediate object
+    # for mesh in mesh_list:
+    #     original_pos_list.extend(get_unanimated_vertex_positions(mesh))
     
     total_frames = len(time_stamps)
+    # base_idx = 0
     
     # Loop through each frame
     for i, frame in enumerate(time_stamps):
         cmds.currentTime(frame)
-        global_vtx_index = 0
+        idx = 0
 
         for mesh in mesh_list:
             vtx_count = cmds.polyEvaluate(mesh, vertex=True)
             for j in range(vtx_count):
                 vtx = f"{mesh}.vtx[{j}]"
-                current_pos = cmds.pointPosition(vtx, world=True)
-                base_pos = original_pos_list[global_vtx_index]
+                pos = cmds.pointPosition(vtx, world=True)
+                base = base_position[idx]
+                offset = [pos[k] - base[k] for k in range(3)]
 
-                # Offset from base pose
-                offset_x = current_pos[0] - base_pos[0]
-                offset_y = current_pos[1] - base_pos[1]
-                offset_z = current_pos[2] - base_pos[2]
-
-                output_list.extend([offset_x, offset_y, offset_z, 1.0])
-                global_vtx_index += 1
-             
+                output_list.extend(offset+[1.0])
+                idx += 1
+        #base_idx += vtx_count     
         if progress_fn:
             percent = int((i + 1) / total_frames * 50) 
             progress_fn(percent)
     
     return output_list
 
-def get_min_max_of_relative_positions_per_axis(mesh_list, time_stamps, margin=0.0):
+def get_min_max_of_relative_positions_per_axis(mesh_list, time_stamps, base_position, margin=0.0):
     vtx_orig_pos = []
+    idx = 0
 
     x_min = y_min = z_min = float("inf")
     x_max = y_max = z_max = float("-inf")
@@ -241,16 +249,15 @@ def get_min_max_of_relative_positions_per_axis(mesh_list, time_stamps, margin=0.
 
     for frame in time_stamps:
         cmds.currentTime(frame)
-        global_vtx_index = 0
-
+        global_idx = 0 
         for mesh in mesh_list:
             vtx_count = cmds.polyEvaluate(mesh, vertex=True)
             for i in range(vtx_count):
                 vtx = f"{mesh}.vtx[{i}]"
                 pos = cmds.pointPosition(vtx, world=True)
-                base = vtx_orig_pos[global_vtx_index]
+                base = base_position[global_idx]
 
-                offset = [pos[i] - base[i] for i in range(3)]
+                offset = [pos[j] - base[j] for j in range(3)]
                 
                 x_min = min(x_min, offset[0])
                 x_max = max(x_max, offset[0])
@@ -259,7 +266,7 @@ def get_min_max_of_relative_positions_per_axis(mesh_list, time_stamps, margin=0.
                 z_min = min(z_min, offset[2])
                 z_max = max(z_max, offset[2])
 
-                global_vtx_index += 1
+                global_idx += 1
 
     return (
         [x_min - margin, y_min - margin, z_min - margin],
@@ -344,11 +351,7 @@ def make_dat_texture(output_dir=None, base_filename="output", progress_fn=None):
     
     print("Collecting information...")
 
-    mesh_list = []
-    if (Selected_Meshes):
-        mesh_list = get_list_of_selected_meshes()
-    else:
-        mesh_list = get_list_of_all_meshes()
+    mesh_list = get_list_of_selected_meshes() if Selected_Meshes else get_list_of_all_meshes()
     
     if len(mesh_list) != 1:
         cmds.error("Please select exactly one mesh.")
@@ -359,6 +362,9 @@ def make_dat_texture(output_dir=None, base_filename="output", progress_fn=None):
     time_max = int(cmds.playbackOptions(q=True, max=True))
     frame_range = list(range(time_min, time_max + 1))
     nr_of_frames = len(frame_range)
+
+    base_frame = 0
+    base_positions = get_vertex_positions_at_frame(mesh_list, base_frame)
     
     fps = demystify(cmds.currentUnit(query=True, time=True))
 
@@ -370,12 +376,12 @@ def make_dat_texture(output_dir=None, base_filename="output", progress_fn=None):
     """ Get min & max position relative to first frame for normalize vertex positions with padding """
     print("Getting min and max positions for optimized scaling...")
     #scale_min, scale_max = get_min_max_of_relative_positions(mesh_list, frame_range, 0.1)
-    scale_min, scale_max = get_min_max_of_relative_positions_per_axis(mesh_list, frame_range, 0.1)
+    scale_min, scale_max = get_min_max_of_relative_positions_per_axis(mesh_list, frame_range,base_positions,  0.1)
 
 #-----------------------------------------------------------------------
     # 頂点位置バッファの取得
     print("Appending vertex positions...")
-    position_buffer = append_vertex_positions_float32(mesh_list, frame_range, scale_min, scale_max, progress_fn=progress_fn)
+    position_buffer = append_vertex_positions_float32(mesh_list, frame_range, base_positions, scale_min, scale_max, progress_fn=progress_fn)
 
     # 法線バッファの取得
     print("Appending normals...")

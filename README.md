@@ -36,6 +36,7 @@ Please learn how to use this script from How-To
     ui.show_ui()
   
 ## How-To
+* Please key in bind pose at 0 frame
 * Make sure the time slider is within the range of the animation you want to output
 * Select a skinned mesh
 * Select the output directory 
